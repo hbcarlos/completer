@@ -13,7 +13,7 @@ import { CompletionHandler } from './handler';
  * A context+kernel connector for completion handlers.
  */
 export class CompletionConnector extends DataConnector<
-  CompletionHandler.IReply,
+  CompletionHandler.ICompletionItemsReply,
   void,
   CompletionHandler.IRequest
 > {
@@ -35,7 +35,7 @@ export class CompletionConnector extends DataConnector<
    */
   fetch(
     request: CompletionHandler.IRequest
-  ): Promise<CompletionHandler.IReply> {
+  ): Promise<CompletionHandler.ICompletionItemsReply> {
     return Promise.all([
       this._kernel.fetch(request),
       this._context.fetch(request)
@@ -76,31 +76,31 @@ namespace Private {
    * duplicates from the context list that appear in the kernel list.
    */
   export function mergeReplies(
-    kernel: CompletionHandler.IReply,
-    context: CompletionHandler.IReply
-  ): CompletionHandler.IReply {
+    kernel: CompletionHandler.ICompletionItemsReply,
+    context: CompletionHandler.ICompletionItemsReply
+  ): CompletionHandler.ICompletionItemsReply {
     // If one is empty, return the other.
-    if (kernel.matches.length === 0) {
+    if (kernel.items.length === 0) {
       return context;
-    } else if (context.matches.length === 0) {
+    } else if (context.items.length === 0) {
       return kernel;
     }
 
     // Populate the result with a copy of the kernel matches.
-    const matches = kernel.matches.slice();
+    const items = kernel.items.slice();
 
     // Cache all the kernel matches in a memo.
-    const memo = matches.reduce((acc, val) => {
-      acc[val] = null;
+    const memo = items.reduce((acc, val) => {
+      acc[val.label] = null;
       return acc;
     }, {} as { [key: string]: string | null });
 
     // Add each context match that is not in the memo to the result.
-    context.matches.forEach(match => {
-      if (!(match in memo)) {
-        matches.push(match);
+    context.items.forEach(item => {
+      if (!(item.label in memo)) {
+        items.push(item);
       }
     });
-    return { ...kernel, matches };
+    return { ...kernel, items };
   }
 }

@@ -3,8 +3,6 @@
 
 import { CodeEditor } from '@jupyterlab/codeeditor';
 
-import { IDataConnector } from '@jupyterlab/statedb';
-
 import { Token } from '@lumino/coreutils';
 
 import { Widget } from '@lumino/widgets';
@@ -53,13 +51,7 @@ export namespace ICompletionManager {
      * The data connector used to populate the completer.
      * Use the connector with ICompletionItemsReply for enhanced completions.
      */
-    connector:
-      | IDataConnector<
-          CompletionHandler.IReply,
-          void,
-          CompletionHandler.IRequest
-        >
-      | CompletionHandler.ICompletionItemsConnector;
+    connector: CompletionHandler.ICompletionItemsConnector;
   }
 
   /**
