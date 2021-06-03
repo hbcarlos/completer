@@ -11,12 +11,9 @@ import {
 } from '@jupyterlab/application';
 
 import {
-  CompleterModel,
-  Completer,
-  CompletionConnector,
-  CompletionHandler,
-  ContextConnector,
-  ICompletionManager
+  ICompletionManager,
+  CompletionManager,
+  DefaultProvider
 } from './completer';
 
 import { IConsoleTracker } from '@jupyterlab/console';
@@ -24,12 +21,6 @@ import { IConsoleTracker } from '@jupyterlab/console';
 import { IEditorTracker } from '@jupyterlab/fileeditor';
 
 import { INotebookTracker } from '@jupyterlab/notebook';
-
-import { Session } from '@jupyterlab/services';
-
-import { find, toArray } from '@lumino/algorithm';
-
-import { Widget } from '@lumino/widgets';
 
 /**
  * The command IDs used by the completer plugin.
@@ -58,9 +49,15 @@ namespace CommandIDs {
 const manager: JupyterFrontEndPlugin<ICompletionManager> = {
   id: '@quantstack/completer-extension:manager',
   autoStart: true,
+  requires: [IConsoleTracker, IEditorTracker, INotebookTracker],
   provides: ICompletionManager,
-  activate: (app: JupyterFrontEnd): ICompletionManager => {
-    const handlers: { [id: string]: CompletionHandler } = {};
+  activate: (app: JupyterFrontEnd, consoles: IConsoleTracker, editors: IEditorTracker, notebooks: INotebookTracker): ICompletionManager => {
+    const manager = new CompletionManager({
+      app,
+      consoles,
+      editors,
+      notebooks
+    });
 
     app.commands.addCommand(CommandIDs.invoke, {
       execute: args => {
@@ -68,11 +65,7 @@ const manager: JupyterFrontEndPlugin<ICompletionManager> = {
         if (!id) {
           return;
         }
-        console.debug("Invoke extension");
-        const handler = handlers[id];
-        if (handler) {
-          handler.invoke();
-        }
+        manager.invoke(id);
       }
     });
 
@@ -83,50 +76,11 @@ const manager: JupyterFrontEndPlugin<ICompletionManager> = {
           return;
         }
 
-        const handler = handlers[id];
-        if (handler) {
-          handler.completer.selectActive();
-        }
+        manager.selectActive(id);
       }
     });
 
-    return {
-      register: (
-        completable: ICompletionManager.ICompletable,
-        renderer: Completer.IRenderer = Completer.defaultRenderer
-      ): ICompletionManager.ICompletableAttributes => {
-        const { connector, editor, parent } = completable;
-        const model = new CompleterModel();
-        const completer = new Completer({ editor, model, renderer });
-        const handler = new CompletionHandler({
-          completer,
-          connector
-        });
-        const id = parent.id;
-
-        // Hide the widget when it first loads.
-        completer.hide();
-
-        // Associate the handler with the parent widget.
-        handlers[id] = handler;
-
-        // Set the handler's editor.
-        handler.editor = editor;
-
-        // Attach the completer widget.
-        Widget.attach(completer, document.body);
-
-        // Listen for parent disposal.
-        parent.disposed.connect(() => {
-          delete handlers[id];
-          model.dispose();
-          completer.dispose();
-          handler.dispose();
-        });
-
-        return handler;
-      }
-    };
+    return manager;
   }
 };
 
@@ -142,29 +96,6 @@ const consoles: JupyterFrontEndPlugin<void> = {
     manager: ICompletionManager,
     consoles: IConsoleTracker
   ): void => {
-    // Create a handler for each console that is created.
-    consoles.widgetAdded.connect((sender, widget) => {
-      const anchor = widget.console;
-      const editor = anchor.promptCell?.editor ?? null;
-      const session = anchor.sessionContext.session;
-      // TODO: CompletionConnector assumes editor and session are not null
-      const connector = new CompletionConnector({ session, editor });
-      const handler = manager.register({ connector, editor, parent: widget });
-
-      const updateConnector = () => {
-        const editor = anchor.promptCell?.editor ?? null;
-        const session = anchor.sessionContext.session;
-
-        handler.editor = editor;
-        // TODO: CompletionConnector assumes editor and session are not null
-        handler.connector = new CompletionConnector({ session, editor });
-      };
-
-      // Update the handler whenever the prompt or session changes
-      anchor.promptCellCreated.connect(updateConnector);
-      anchor.sessionContext.sessionChanged.connect(updateConnector);
-    });
-
     // Add console completer invoke command.
     app.commands.addCommand(CommandIDs.invokeConsole, {
       execute: () => {
@@ -193,6 +124,8 @@ const consoles: JupyterFrontEndPlugin<void> = {
       keys: ['Enter'],
       selector: `.jp-ConsolePanel .jp-mod-completer-active`
     });
+
+    manager.register(new DefaultProvider());
   }
 };
 
@@ -208,28 +141,6 @@ const notebooks: JupyterFrontEndPlugin<void> = {
     manager: ICompletionManager,
     notebooks: INotebookTracker
   ): void => {
-    console.debug("Activated extension");
-    // Create a handler for each notebook that is created.
-    notebooks.widgetAdded.connect((sender, panel) => {
-      const editor = panel.content.activeCell?.editor ?? null;
-      const session = panel.sessionContext.session;
-      // TODO: CompletionConnector assumes editor and session are not null
-      const connector = new CompletionConnector({ session, editor });
-      const handler = manager.register({ connector, editor, parent: panel });
-
-      const updateConnector = () => {
-        const editor = panel.content.activeCell?.editor ?? null;
-        const session = panel.sessionContext.session;
-
-        handler.editor = editor;
-        // TODO: CompletionConnector assumes editor and session are not null
-        handler.connector = new CompletionConnector({ session, editor });
-      };
-
-      // Update the handler whenever the prompt or session changes
-      panel.content.activeCellChanged.connect(updateConnector);
-      panel.sessionContext.sessionChanged.connect(updateConnector);
-    });
 
     // Add notebook completer command.
     app.commands.addCommand(CommandIDs.invokeNotebook, {
@@ -273,77 +184,7 @@ const files: JupyterFrontEndPlugin<void> = {
     manager: ICompletionManager,
     editorTracker: IEditorTracker
   ): void => {
-    // Keep a list of active ISessions so that we can
-    // clean them up when they are no longer needed.
-    const activeSessions: {
-      [id: string]: Session.ISessionConnection;
-    } = {};
-
-    // When a new file editor is created, make the completer for it.
-    editorTracker.widgetAdded.connect((sender, widget) => {
-      const sessions = app.serviceManager.sessions;
-      const editor = widget.content.editor;
-      const contextConnector = new ContextConnector({ editor });
-
-      // Initially create the handler with the contextConnector.
-      // If a kernel session is found matching this file editor,
-      // it will be replaced in onRunningChanged().
-      const handler = manager.register({
-        connector: contextConnector,
-        editor,
-        parent: widget
-      });
-
-      // When the list of running sessions changes,
-      // check to see if there are any kernels with a
-      // matching path for this file editor.
-      const onRunningChanged = (
-        sender: Session.IManager,
-        models: Session.IModel[]
-      ) => {
-        const oldSession = activeSessions[widget.id];
-        // Search for a matching path.
-        const model = find(models, m => m.path === widget.context.path);
-        if (model) {
-          // If there is a matching path, but it is the same
-          // session as we previously had, do nothing.
-          if (oldSession && oldSession.id === model.id) {
-            return;
-          }
-          // Otherwise, dispose of the old session and reset to
-          // a new CompletionConnector.
-          if (oldSession) {
-            delete activeSessions[widget.id];
-            oldSession.dispose();
-          }
-          const session = sessions.connectTo({ model });
-          handler.connector = new CompletionConnector({ session, editor });
-          activeSessions[widget.id] = session;
-        } else {
-          // If we didn't find a match, make sure
-          // the connector is the contextConnector and
-          // dispose of any previous connection.
-          handler.connector = contextConnector;
-          if (oldSession) {
-            delete activeSessions[widget.id];
-            oldSession.dispose();
-          }
-        }
-      };
-      onRunningChanged(sessions, toArray(sessions.running()));
-      sessions.runningChanged.connect(onRunningChanged);
-
-      // When the widget is disposed, do some cleanup.
-      widget.disposed.connect(() => {
-        sessions.runningChanged.disconnect(onRunningChanged);
-        const session = activeSessions[widget.id];
-        if (session) {
-          delete activeSessions[widget.id];
-          session.dispose();
-        }
-      });
-    });
-
+    
     // Add console completer invoke command.
     app.commands.addCommand(CommandIDs.invokeFile, {
       execute: () => {

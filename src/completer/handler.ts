@@ -15,6 +15,8 @@ import { Message, MessageLoop } from '@lumino/messaging';
 
 import { Signal } from '@lumino/signaling';
 
+import { ICompletionProvider } from './tokens';
+
 import { Completer } from './widget';
 
 /**
@@ -38,30 +40,13 @@ export class CompletionHandler implements IDisposable {
     this.completer = options.completer;
     this.completer.selected.connect(this.onCompletionSelected, this);
     this.completer.visibilityChanged.connect(this.onVisibilityChanged, this);
-    this._connector = options.connector;
+    this._providers = options.providers;
   }
 
   /**
    * The completer widget managed by the handler.
    */
   readonly completer: Completer;
-
-  /**
-   * The data connector used to populate completion requests.
-   *
-   * #### Notes
-   * The only method of this connector that will ever be called is `fetch`, so
-   * it is acceptable for the other methods to be simple functions that return
-   * rejected promises.
-   */
-  get connector(): CompletionHandler.ICompletionItemsConnector {
-    return this._connector;
-  }
-  set connector(
-    connector: CompletionHandler.ICompletionItemsConnector
-  ) {
-    this._connector = connector;
-  }
 
   /**
    * The editor used by the completion handler.
@@ -335,97 +320,23 @@ export class CompletionHandler implements IDisposable {
       return Promise.reject(new Error('No active editor'));
     }
 
+    this.completer.model?.reset(true);
+
     const text = editor.model.value.text;
     const offset = Text.jsIndexToCharIndex(editor.getOffsetAt(position), text);
-    const pending = ++this._pending;
+    //const pending = ++this._pending;
     const state = this.getState(editor, position);
     const request: CompletionHandler.IRequest = { text, offset };
 
-    return this._connector
-      .fetch(request)
-      .then(reply => {
-        this._validate(pending, request);
-        if (!reply) {
-          throw new Error(`Invalid request: ${request}`);
-        }
-
-        this._onReply(state, reply);
-      })
-      .catch(_ => {
-        this._onFailure();
-      });
+    // TODO: update model (position cursor) and validate response
+    this._providers.forEach( provider => provider.fetch(state, request) );
+    return Promise.resolve();
   }
 
-  private _validate(pending: number, request: CompletionHandler.IRequest) {
-    if (this.isDisposed) {
-      throw new Error('Handler is disposed');
-    }
-    // If a newer completion request has created a pending request, bail.
-    if (pending !== this._pending) {
-      throw new Error('A newer completion request is pending');
-    }
-  }
-
-  /**
-   * Updates model with text state and current cursor position.
-   */
-  private _updateModel(
-    state: Completer.ITextState,
-    start: number,
-    end: number
-  ): Completer.IModel | null {
-    const model = this.completer.model;
-    const text = state.text;
-
-    if (!model) {
-      return null;
-    }
-
-    // Update the original request.
-    model.original = state;
-    // Update the cursor.
-    model.cursor = {
-      start: Text.charIndexToJsIndex(start, text),
-      end: Text.charIndexToJsIndex(end, text)
-    };
-    return model;
-  }
-
-  /**
-   * Receive completion items from provider.
-   *
-   * @param state - The state of the editor when completion request was made.
-   *
-   * @param reply - The API response returned for a completion request.
-   */
-  private _onReply(
-    state: Completer.ITextState,
-    reply: CompletionHandler.ICompletionItemsReply
-  ): void {
-    const model = this._updateModel(state, reply.start, reply.end);
-    if (!model) {
-      return;
-    }
-    if (model.setCompletionItems) {
-      model.setCompletionItems(reply.items);
-    }
-  }
-
-  /**
-   * If completion request fails, reset model and fail silently.
-   */
-  private _onFailure() {
-    const model = this.completer.model;
-
-    if (model) {
-      model.reset(true);
-    }
-  }
-
-  private _connector: CompletionHandler.ICompletionItemsConnector;
+  private _providers: ICompletionProvider[];
   private _editor: CodeEditor.IEditor | null = null;
   private _enabled = false;
-  private _pending = 0;
+  //private _pending = 0;
   private _isDisposed = false;
 }
 
@@ -450,7 +361,7 @@ export namespace CompletionHandler {
      * it is acceptable for the other methods to be simple functions that return
      * rejected promises.
      */
-    connector: CompletionHandler.ICompletionItemsConnector;
+    providers: ICompletionProvider[];
   }
 
   /**

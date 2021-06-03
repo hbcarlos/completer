@@ -16,6 +16,7 @@ import { StringExt } from '@lumino/algorithm';
 import { ISignal, Signal } from '@lumino/signaling';
 
 import { CompletionHandler } from './handler';
+
 import { Completer } from './widget';
 
 /**
@@ -172,7 +173,7 @@ export class CompleterModel implements Completer.IModel {
    * #### Notes
    * This is a read-only property.
    */
-  completionItems?(): CompletionHandler.ICompletionItems {
+  completionItems(): CompletionHandler.ICompletionItems {
     let query = this._query;
     if (query) {
       return this._markup(query);
@@ -184,7 +185,7 @@ export class CompleterModel implements Completer.IModel {
    * Set the list of visible items in the completer menu, and append any
    * new types to KNOWN_TYPES.
    */
-  setCompletionItems?(newValue: CompletionHandler.ICompletionItems): void {
+  setCompletionItems(newValue: CompletionHandler.ICompletionItems): void {
     if (
       JSONExt.deepEqual(
         (newValue as unknown) as ReadonlyPartialJSONArray,

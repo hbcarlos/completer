@@ -1,3 +1,6 @@
-# @jupyterlab/completer
+# Completer
 
-A JupyterLab package which provides a text completer for editing code in the Jupyter [notebook](../notebook) and [code console](../console).
+This extension is a refactor of the core completer extension to improve it and make it easier for extensions to add new Providers.
+
+
+![](./completer.png)

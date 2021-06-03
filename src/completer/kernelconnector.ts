@@ -57,7 +57,11 @@ export class KernelConnector extends DataConnector<
     const metadata = response.metadata._jupyter_types_experimental as Array<JSONObject>;
     response.matches.forEach( (label, index) => {
       if (metadata[index]) {
-        items.push({ label, type: metadata[index]['type'] as string });
+        items.push({
+          label,
+          type: metadata[index].type as string,
+          insertText: metadata[index].text as string
+        });
       } else {
         items.push({ label });
       }
